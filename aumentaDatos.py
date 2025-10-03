@@ -6,11 +6,10 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 # --- Configuración ---
 rutaDataset = 'dataset'
-# Número de imágenes a generar por cada tipo de aumento
 numAumentosColor = 8
-numAumentosBlancoNegro = 2 # Se generarán 2 versiones en blanco y negro por original
+numAumentosBlancoNegro = 2
 
-# --- Inicialización del Generador de Aumentación (con brillo) ---
+# --- Inicialización del Generador de Aumentación ---
 datagen = ImageDataGenerator(
     rotation_range=20,
     width_shift_range=0.2,
@@ -22,7 +21,7 @@ datagen = ImageDataGenerator(
     fill_mode='nearest'
 )
 
-print("Iniciando el proceso de aumentación de datos avanzado...")
+print("Iniciando el proceso de aumentación de datos inteligente...")
 
 # Itera sobre cada carpeta de persona en el dataset
 for nombrePersona in os.listdir(rutaDataset):
@@ -31,17 +30,27 @@ for nombrePersona in os.listdir(rutaDataset):
     if not os.path.isdir(rutaPersona):
         continue
     
-    print(f"\nProcesando carpeta: {nombrePersona}")
+    # --- LÓGICA DE DETECCIÓN ---
+    # Revisa si la carpeta ya tiene imágenes aumentadas
+    tieneAumentos = False
+    for archivo in os.listdir(rutaPersona):
+        if '_aug_' in archivo:
+            tieneAumentos = True
+            break # Si encuentra una, ya no necesita seguir buscando
+            
+    if tieneAumentos:
+        print(f"\n[INFO] La carpeta '{nombrePersona}' ya tiene datos aumentados. Omitiendo.")
+        continue # Salta a la siguiente persona
+    
+    # Si llega aquí, es un nuevo registro y necesita ser procesado
+    print(f"\n[NUEVO] Procesando nueva carpeta: {nombrePersona}")
     
     # Itera sobre cada imagen original en la carpeta de la persona
     for nombreFoto in os.listdir(rutaPersona):
+        # Asegura procesar solo las imágenes originales
         if not (nombreFoto.lower().endswith('.jpg') or nombreFoto.lower().endswith('.png')):
             continue
         
-        # Omitir imágenes que ya son aumentadas para no re-aumentarlas
-        if '_aug_' in nombreFoto:
-            continue
-
         rutaFotoOriginal = os.path.join(rutaPersona, nombreFoto)
         imagenOriginal = cv2.imread(rutaFotoOriginal)
         
@@ -51,39 +60,32 @@ for nombrePersona in os.listdir(rutaDataset):
 
         print(f"  - Aumentando imagen: {nombreFoto}")
         
-        # --- 1. GENERAR AUMENTOS DE COLOR Y BRILLO ---
+        # 1. Generar aumentos de color y brillo
         imagenParaAumentar = np.expand_dims(imagenOriginal, 0)
         i = 0
         for lote in datagen.flow(imagenParaAumentar, batch_size=1):
             nombreBase, extension = os.path.splitext(nombreFoto)
             nombreNuevo = f'{nombreBase}_aug_color_{i}{extension}'
             rutaNueva = os.path.join(rutaPersona, nombreNuevo)
-
             imagenAumentada = lote[0].astype('uint8')
             cv2.imwrite(rutaNueva, imagenAumentada)
-            
             i += 1
             if i >= numAumentosColor:
                 break
         
-        # --- 2. GENERAR AUMENTOS EN BLANCO Y NEGRO ---
+        # 2. Generar aumentos en blanco y negro
         imagenGris = cv2.cvtColor(imagenOriginal, cv2.COLOR_BGR2GRAY)
-        
         for j in range(numAumentosBlancoNegro):
             nombreBase, extension = os.path.splitext(nombreFoto)
             nombreNuevo = f'{nombreBase}_aug_bw_{j}{extension}'
             rutaNueva = os.path.join(rutaPersona, nombreNuevo)
-            
-            # Para la primera imagen en blanco y negro, la guardamos tal cual
             if j == 0:
                 cv2.imwrite(rutaNueva, imagenGris)
-            # Para las siguientes, aplicamos una transformación simple (ej. un volteo horizontal aleatorio)
             else:
                 if random.choice([True, False]):
-                    imagenGrisTransformada = cv2.flip(imagenGris, 1) # 1 para volteo horizontal
+                    imagenGrisTransformada = cv2.flip(imagenGris, 1)
                     cv2.imwrite(rutaNueva, imagenGrisTransformada)
                 else:
-                    # Guardamos la misma si no se aplica la transformación
                     cv2.imwrite(rutaNueva, imagenGris)
 
 print("\n¡Proceso de aumentación completado!")
