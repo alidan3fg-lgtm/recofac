@@ -92,10 +92,17 @@ BASE_POSES = [
 ]
 # --- FUNCIÓN PRINCIPAL (AHORA IMPORTABLE) ---
 def iniciar_captura_guiada(nombre_persona: str):
+    """
+    Inicia el proceso de captura de fotos guiado para una persona específica.
+    Crea la carpeta, hace las preguntas y guarda las imágenes.
+    
+    Args:
+        nombre_persona (str): El nombre de la persona a registrar.
+    """
     if not nombre_persona:
         print("Error: El nombre de la persona no puede estar vacío.")
         return
-
+    
     person_dir = os.path.join(RUTA_DATASET_BASE, nombre_persona)
     os.makedirs(person_dir, exist_ok=True)
     print(f"Directorio de registro: {person_dir}")
