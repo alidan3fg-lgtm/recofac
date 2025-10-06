@@ -4,6 +4,24 @@ import aumentaDatos
 import red_siamesa
 import eliminaCapturas
 import verificacion
+import aumentaDatos
+
+def flujoEntrenamientoManual():
+    print("\n--- Configuración del Entrenamiento Manual ---")
+    if len(os.listdir('dataset')) < 2:
+        print("No hay suficientes datos (se necesitan al menos 2 personas) para entrenar.")
+        return
+
+    try:
+        # Pide al usuario el número de épocas
+        epocas = int(input("Introduce el número de épocas para el entrenamiento (ej. 10, 20, 50): "))
+        if epocas > 0:
+            # Llama a la función de entrenamiento con las épocas especificadas
+            red_siamesa.entrenarModeloSiames(epocas)
+        else:
+            print("El número de épocas debe ser mayor a cero.")
+    except ValueError:
+        print("Entrada no válida. Debes ingresar un número entero.")
 
 def flujoRegistrarPersona():
     nombreUsuario = input("Introduce el nombre para el nuevo registro: ")

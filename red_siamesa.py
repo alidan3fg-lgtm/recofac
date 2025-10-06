@@ -1,3 +1,4 @@
+# red_siamesa.py
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Lambda
@@ -7,10 +8,11 @@ import os
 import cv2
 import random
 
-# --- Configuración ---
+# --- Configuracion (se mantiene igual) ---
 IMG_SHAPE = (105, 105)
 RUTA_DATASET = 'dataset'
 
+# --- Todas las funciones auxiliares (cargarYPreprocesarImagen, crearPares, etc.) se mantienen igual ---
 def cargarYPreprocesarImagen(rutaImagen):
     img = cv2.imread(rutaImagen, cv2.IMREAD_GRAYSCALE)
     img = cv2.resize(img, IMG_SHAPE)
@@ -18,31 +20,25 @@ def cargarYPreprocesarImagen(rutaImagen):
     return np.expand_dims(img, axis=-1)
 
 def crearPares(rutaDataset):
-    print("Creando pares de imágenes para el entrenamiento...")
+    print("Creando pares de imagenes...")
     personas = [d for d in os.listdir(rutaDataset) if os.path.isdir(os.path.join(rutaDataset, d))]
-    paresImg = []
-    etiquetas = []
-
+    paresImg, etiquetas = [], []
     for i, nombrePersona in enumerate(personas):
         rutaPersona = os.path.join(rutaDataset, nombrePersona)
         imagenesPersona = [os.path.join(rutaPersona, f) for f in os.listdir(rutaPersona)]
-        
         for _ in range(len(imagenesPersona) * 2):
-            imgPath1, imgPath2 = random.sample(imagenesPersona, 2)
-            paresImg.append([imgPath1, imgPath2])
+            img1Path, img2Path = random.sample(imagenesPersona, 2)
+            paresImg.append([img1Path, img2Path])
             etiquetas.append(1.0)
-
         if len(personas) > 1:
             otraPersonaIdx = random.choice([j for j in range(len(personas)) if j != i])
             nombreOtraPersona = personas[otraPersonaIdx]
             imagenesOtraPersona = [os.path.join(rutaDataset, nombreOtraPersona, f) for f in os.listdir(os.path.join(rutaDataset, nombreOtraPersona))]
-            
             for _ in range(len(imagenesPersona)):
-                imgPath1 = random.choice(imagenesPersona)
-                imgPath2 = random.choice(imagenesOtraPersona)
-                paresImg.append([imgPath1, imgPath2])
+                img1Path = random.choice(imagenesPersona)
+                img2Path = random.choice(imagenesOtraPersona)
+                paresImg.append([img1Path, img2Path])
                 etiquetas.append(0.0)
-    
     return np.array(paresImg), np.array(etiquetas)
 
 def crearRedBase(inputShape):
@@ -62,14 +58,16 @@ def distanciaEuclidiana(vectores):
     sumSquared = tf.reduce_sum(tf.square(featsA - featsB), axis=1, keepdims=True)
     return tf.sqrt(tf.maximum(sumSquared, tf.keras.backend.epsilon()))
 
-def lossContrastivo(yTrue, yPred, margin=1.0):
+def perdidaContrastiva(yTrue, yPred, margin=1.0):
     yTrue = tf.cast(yTrue, yPred.dtype)
     squaredPred = tf.square(yPred)
     marginSquare = tf.square(tf.maximum(margin - yPred, 0))
     return tf.reduce_mean(yTrue * squaredPred + (1 - yTrue) * marginSquare)
 
-def entrenarModeloSiames():
-    print("\n--- INICIANDO ENTRENAMIENTO DE LA RED SIAMESA ---")
+
+# --- CAMBIO AQUÍ: La función ahora acepta un parámetro 'epocas' ---
+def entrenarModeloSiames(epocas=250):
+    print(f"\n--- INICIANDO ENTRENAMIENTO DE RED SIAMESA POR {epocas} EPOCAS ---")
     
     pares, etiquetas = crearPares(RUTA_DATASET)
     
@@ -89,16 +87,17 @@ def entrenarModeloSiames():
     
     modeloSiames = Model(inputs=[inputA, inputB], outputs=distancia)
 
-    modeloSiames.compile(optimizer=Adam(learning_rate=0.0001), loss=lossContrastivo)
+    modeloSiames.compile(optimizer=Adam(learning_rate=0.0001), loss=perdidaContrastiva)
     
-    print("Iniciando el entrenamiento...")
+    print("Iniciando entrenamiento del modelo...")
     modeloSiames.fit(
         [paresProcesados1, paresProcesados2],
         etiquetas,
         validation_split=0.1,
         batch_size=16,
-        epochs=150
+        epochs=epocas  # Se usa el parámetro aquí
     )
 
-    print("Guardando modelo base como 'redSiamesaBase.h5'...")
+    print("Guardando modelo base...")
     redBase.save("redSiamesaBase.h5")
+    print("Modelo guardado como 'redSiamesaBase.h5'.")
