@@ -1,143 +1,330 @@
-import os, cv2, time, csv, math, numpy as np
+#!/usr/bin/env python3
+# capture_faces_video_lenient.py
+# Reqs: pip install opencv-python mediapipe numpy
+
+import os, cv2, time, math, numpy as np
 try:
     import mediapipe as mp
 except ImportError:
     raise SystemExit("Falta mediapipe. Instala con: pip install mediapipe")
 
-# --- Configuracion y Funciones de Dibujo (sin cambios) ---
-rutaDatasetBase = 'dataset'
-fotosPorPose = 1
-minEarOpen = 0.20
-minBlur = 60.0
-minBrightness = 70.0
-maxBrightness = 220.0
+# ---------- helpers visuales ----------
+def ascii_only(s: str) -> str:
+    table = str.maketrans("áéíóúñÁÉÍÓÚÑ", "aeiounAEIOUN")
+    s = s.translate(table)
+    return s.encode("ascii", "ignore").decode("ascii")
 
-def drawText(img, text, org, scale=0.8, color=(255,255,255), thick=2):
-    cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
+def put_centered(img, text, y_px, scale, color=(240,255,240), thick=2):
+    text = ascii_only(text)
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thick)
+    x = (img.shape[1] - tw)//2
+    y = y_px + th//2
+    cv2.putText(img, text, (x+2,y+2), cv2.FONT_HERSHEY_SIMPLEX, scale, (0,0,0), thick*3, cv2.LINE_AA)
+    cv2.putText(img, text, (x,y),     cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
 
-# --- Funciones de Metricas y Puntos Clave ---
-def euclidean(p1, p2): return math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+def band(canvas, y, h, a=0.38):
+    ov = canvas.copy()
+    cv2.rectangle(ov, (0,y), (canvas.shape[1], y+h), (0,0,0), -1)
+    cv2.addWeighted(ov, a, canvas, 1-a, 0, canvas)
 
-mpFaceMesh = mp.solutions.face_mesh
-LEFT_EYE_OUTER, LEFT_EYE_INNER, LEFT_EYE_UP, LEFT_EYE_DOWN = 33, 133, 159, 145
-RIGHT_EYE_OUTER, RIGHT_EYE_INNER, RIGHT_EYE_UP, RIGHT_EYE_DOWN = 362, 263, 386, 374
-MOUTH_UP, MOUTH_DOWN = 13, 14
+def draw_dot(canvas, ok):
+    h,w = canvas.shape[:2]
+    cv2.circle(canvas, (w-40,40), 14, (0,0,0), -1)
+    cv2.circle(canvas, (w-40,40), 12, (0,200,0) if ok else (0,200,255), -1)
 
-def landmarksToNp(landmarks, w, h):
-    idxs = [LEFT_EYE_OUTER, LEFT_EYE_INNER, LEFT_EYE_UP, LEFT_EYE_DOWN,
-            RIGHT_EYE_OUTER, RIGHT_EYE_INNER, RIGHT_EYE_UP, RIGHT_EYE_DOWN,
-            MOUTH_UP, MOUTH_DOWN]
-    return {i:(int(landmarks[i].x*w), int(landmarks[i].y*h)) for i in idxs}
+def make_letterboxed_canvas(frame, screen_w, screen_h):
+    fh, fw = frame.shape[:2]
+    s = min(screen_w / fw, screen_h / fh)
+    new_w = int(fw * s); new_h = int(fh * s)
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((screen_h, screen_w, 3), dtype=np.uint8)
+    x0 = (screen_w - new_w)//2
+    y0 = (screen_h - new_h)//2
+    canvas[y0:y0+new_h, x0:x0+new_w] = resized
+    return canvas, (x0, y0, new_w, new_h), s
 
-def approxYawRatio(pts):
-    le_w = euclidean(pts[LEFT_EYE_OUTER],  pts[LEFT_EYE_INNER]) + 1e-6
-    re_w = euclidean(pts[RIGHT_EYE_OUTER], pts[RIGHT_EYE_INNER]) + 1e-6
-    return float(re_w/le_w)
+def safe_crop(img, x1,y1,x2,y2):
+    H,W = img.shape[:2]
+    x1 = max(0, min(W-1, x1)); x2 = max(0, min(W-1, x2))
+    y1 = max(0, min(H-1, y1)); y2 = max(0, min(H-1, y2))
+    if x2<=x1 or y2<=y1: return None
+    return img[y1:y2, x1:x2]
 
-def faceCentersForPitch(pts):
-    lCenter = ((pts[LEFT_EYE_OUTER][0]+pts[LEFT_EYE_INNER][0])//2, (pts[LEFT_EYE_UP][1]+pts[LEFT_EYE_DOWN][1])//2)
-    rCenter = ((pts[RIGHT_EYE_OUTER][0]+pts[RIGHT_EYE_INNER][0])//2, (pts[RIGHT_EYE_UP][1]+pts[RIGHT_EYE_DOWN][1])//2)
-    eyesCenter = ((lCenter[0]+rCenter[0])//2, (lCenter[1]+rCenter[1])//2)
-    mouthCenter = ((pts[MOUTH_UP][0]+pts[MOUTH_DOWN][0])//2, (pts[MOUTH_UP][1]+pts[MOUTH_DOWN][1])//2)
-    return eyesCenter, mouthCenter
+# ---------- métricas ----------
+def eu(p1,p2): return math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+def lap_var(gray): return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+def mean_v(bgr): return float(np.mean(cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[...,2])) if bgr is not None else float('nan')
 
-# --- CAMBIO IMPORTANTE AQUÍ ---
-def approxPitchRatio(pts, faceH):
-    """Calcula el pitch sin valor absoluto para detectar la dirección."""
-    eyesC, mouthC = faceCentersForPitch(pts)
-    # Se elimina abs() para que el valor dependa de la posición relativa
-    d = mouthC[1] - eyesC[1] 
-    return float(d / max(1.0, faceH))
+L_OUT,L_IN,L_UP,L_DN = 33,133,159,145
+R_OUT,R_IN,R_UP,R_DN = 362,263,386,374
+M_UP,M_DN = 13,14
 
-def bboxFromLandmarks(landmarks, w, h, margin=0.20):
-    xs = [int(l.x*w) for l in landmarks]; ys = [int(l.y*h) for l in landmarks]
-    x1,y1,x2,y2 = max(0,min(xs)), max(0,min(ys)), min(w-1,max(xs)), min(h-1,max(ys))
-    return x1,y1,x2,y2
+def lm_pts(lms,w,h):
+    idx=[L_OUT,L_IN,L_UP,L_DN,R_OUT,R_IN,R_UP,R_DN,M_UP,M_DN]
+    return {i:(int(lms[i].x*w), int(lms[i].y*h)) for i in idx}
 
-# --- CAMBIO IMPORTANTE AQUÍ: Rangos de PITCH corregidos y lógicos ---
-POSES = [
-    {"name":"1_frente", "hint":"1/5: Mira a la camara, rostro neutro", "yaw":(0.90, 1.10), "pitch":(0.41, 0.43)},
-    {"name":"2_izquierda", "hint":"2/5: Gira LIGERAMENTE a tu izquierda", "yaw":(0.80, 0.95), "pitch":(0.41, 0.43)},
-    {"name":"3_derecha", "hint":"3/5: Gira LIGERAMENTE a tu derecha", "yaw":(1.05, 1.20), "pitch":(0.41, 0.43)},
-    # Para mirar ARRIBA, la distancia ojos-boca es MENOR
-    {"name":"4_arriba", "hint":"4/5: Inclina LIGERAMENTE la cabeza hacia ARRIBA", "yaw":(0.90, 1.10), "pitch":(0.20, 0.24)},
-    # Para mirar ABAJO, la distancia ojos-boca es MAYOR
-    {"name":"5_abajo", "hint":"5/5: Inclina LIGERAMENTE la cabeza hacia ABAJO", "yaw":(0.90, 1.10), "pitch":(0.29, 0.33)},
-]
+def ear(pts):
+    lw = eu(pts[L_OUT],pts[L_IN])+1e-6
+    rw = eu(pts[R_OUT],pts[R_IN])+1e-6
+    lh = eu(pts[L_UP],pts[L_DN]); rh = eu(pts[R_UP],pts[R_DN])
+    return (lh/lw + rh/rw)/2.0
 
-# --- Función Principal del Módulo ---
-def iniciarCaptura(nombrePersona: str):
-    personDir = os.path.join(rutaDatasetBase, nombrePersona)
-    os.makedirs(personDir, exist_ok=True)
+def yaw_ratio(pts):
+    lw = eu(pts[L_OUT],pts[L_IN])+1e-6
+    rw = eu(pts[R_OUT],pts[R_IN])+1e-6
+    return float(rw/lw) # >1 derecha, <1 izquierda
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error crítico: No se pudo abrir la cámara.")
-        return
+def pitch_ratio(pts, face_h):
+    lc = ((pts[L_OUT][0]+pts[L_IN][0])//2, (pts[L_UP][1]+pts[L_DN][1])//2)
+    rc = ((pts[R_OUT][0]+pts[R_IN][0])//2, (pts[R_UP][1]+pts[R_DN][1])//2)
+    ec = ((lc[0]+rc[0])//2, (lc[1]+rc[1])//2)
+    mc = ((pts[M_UP][0]+pts[M_DN][0])//2, (pts[M_UP][1]+pts[M_DN][1])//2)
+    return float(abs(mc[1]-ec[1]) / max(1.0, face_h))
 
-    mesh = mpFaceMesh.FaceMesh(max_num_faces=1, refine_landmarks=True,
-                               min_detection_confidence=0.5, min_tracking_confidence=0.5)
+def bbox_from_lms(lms,w,h,m=0.16):
+    xs=[int(p.x*w) for p in lms]; ys=[int(p.y*h) for p in lms]
+    x1,y1,x2,y2=max(0,min(xs)),max(0,min(ys)),min(w-1,max(xs)),min(h-1,max(ys))
+    bw, bh = x2-x1, y2-y1
+    x1 = max(0,int(x1-bw*m)); y1=max(0,int(y1-bh*m))
+    x2 = min(w-1,int(x2+bw*m)); y2=min(h-1,int(y2+bh*m))
+    return x1,y1,x2,y2,bh
 
-    poseIdx = 0
-    
-    while poseIdx < len(POSES):
-        currentPose = POSES[poseIdx]
-        
-        ret, frameLimpio = cap.read()
-        if not ret: break
-        
-        frameConGuias = frameLimpio.copy()
+# ---------- objetivos base ----------
+BASE = {
+    "yaw_center": (0.98, 1.02),
+    "yaw_soft":   (0.90, 1.10),
+    "pitch_soft": (0.22, 0.36),
+    "ear_min": 0.18,           # mas permisivo
+    "blur_min": 45.0,          # mas permisivo
+    "v_min": 60.0,
+    "v_max": 240.0,
+    "face_frac": (0.18, 0.48)  # distancia mas flexible
+}
 
-        h, w, _ = frameConGuias.shape
-        rgbFrame = cv2.cvtColor(frameConGuias, cv2.COLOR_BGR2RGB)
-        results = mesh.process(rgbFrame)
+def human_delta(value, lo, hi, kind):
+    """Devuelve instruccion precisa y cuanto falta"""
+    if value!=value: return ""
+    if value < lo:
+        if kind == "yaw":   return f"{'izquierda' if value<1 else 'izquierda'} +{int((lo-value)/lo*100)}%"
+        if kind == "pitch": return f"mira arriba +{(lo-value):.02f}"
+    if value > hi:
+        if kind == "yaw":   return f"derecha +{int((value-hi)/hi*100)}%"
+        if kind == "pitch": return f"mira abajo +{(value-hi):.02f}"
+    return ""
 
-        statusText = "Alinea tu rostro..."
-        color = (0, 0, 255)
+def choose_instruction(yaw, pitch, ear_v, blur_v, bright, face_h, H, widen=1.0):
+    # ampliar ventanas segun 'widen' (>=1)
+    yaw_lo, yaw_hi = BASE["yaw_soft"][0] - 0.04*(widen-1), BASE["yaw_soft"][1] + 0.04*(widen-1)
+    pit_lo, pit_hi = BASE["pitch_soft"][0] - 0.02*(widen-1), BASE["pitch_soft"][1] + 0.02*(widen-1)
+    ear_min  = max(0.15, BASE["ear_min"] - 0.02*(widen-1))
+    blur_min = max(30.0, BASE["blur_min"] - 8.0*(widen-1))
+    v_min    = max(40.0, BASE["v_min"] - 10.0*(widen-1))
+    v_max    = min(255.0, BASE["v_max"] + 10.0*(widen-1))
+    frac_lo, frac_hi = BASE["face_frac"][0] - 0.03*(widen-1), BASE["face_frac"][1] + 0.03*(widen-1)
 
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0].landmark
-            x1, y1, x2, y2 = bboxFromLandmarks(landmarks, w, h)
-            faceH = y2 - y1
-            
-            pts = landmarksToNp(landmarks, w, h)
-            
-            yawRatio = approxYawRatio(pts)
-            pitchRatio = approxPitchRatio(pts, faceH)
-            
-            yawOk = (currentPose["yaw"][0] <= yawRatio <= currentPose["yaw"][1])
-            pitchOk = (currentPose["pitch"][0] <= pitchRatio <= currentPose["pitch"][1])
+    # calidad
+    quality_ok = True
+    msg_quality = []
+    if ear_v==ear_v and ear_v < ear_min:
+        quality_ok = False; msg_quality.append("abre los ojos")
+    if blur_v < blur_min:
+        quality_ok = False; msg_quality.append("quedate quieto")
+    if bright==bright and (bright < v_min or bright > v_max):
+        quality_ok = False; msg_quality.append("ajusta la luz")
 
-            if yawOk and pitchOk:
-                statusText = f"LISTO! Presiona [C] para foto {poseIdx + 1}"
-                color = (0, 255, 0)
-            else:
-                reasons = []
-                if not yawOk: reasons.append("ajusta giro")
-                if not pitchOk: reasons.append("ajusta inclinacion")
-                statusText = "Falta: " + ", ".join(reasons)
-            
-            cv2.rectangle(frameConGuias, (x1, y1), (x2, y2), color, 2)
+    # distancia
+    dist_ok = True
+    frac = face_h / max(1.0, H) if H>0 else 0
+    if frac < frac_lo: dist_ok = False; msg_quality.append("acercate")
+    if frac > frac_hi: dist_ok = False; msg_quality.append("alejate")
 
-        drawText(frameConGuias, currentPose["hint"], (20, 40), 0.9, (255, 255, 0), 2)
-        drawText(frameConGuias, statusText, (20, h - 20), 1.0, color, 2)
-        cv2.imshow("Captura Asistida", frameConGuias)
+    # orientacion
+    orient_ok = True
+    orient_msg = ""
+    if yaw==yaw and (yaw < yaw_lo or yaw > yaw_hi):
+        orient_ok = False
+        orient_msg = human_delta(yaw, yaw_lo, yaw_hi, "yaw")
+    if pitch==pitch and (pitch < pit_lo or pitch > pit_hi):
+        orient_ok = False
+        m = human_delta(pitch, pit_lo, pit_hi, "pitch")
+        orient_msg = (orient_msg + " " + m).strip()
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            print("Captura cancelada.")
+    # mensaje final
+    if not orient_ok:
+        label = orient_msg or "ajusta orientacion"
+    elif not quality_ok or not dist_ok:
+        label = ", ".join(msg_quality[:2])  # max 2 mensajes
+    else:
+        label = "mantente quieto"
+
+    # criterio de captura:
+    # - estricto: orient_ok AND quality_ok AND dist_ok
+    # - leniente: al menos 2 de 3 (orient, quality, dist)
+    strict_pass = orient_ok and quality_ok and dist_ok
+    soft_pass = sum([orient_ok, quality_ok, dist_ok]) >= 2
+
+    return label, strict_pass, soft_pass
+
+def main():
+    person = input("Nombre de la persona: ").strip().lower().replace(" ", "_")
+    if not person: raise SystemExit("Nombre invalido.")
+
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if hasattr(cv2, "CAP_DSHOW") else cv2.VideoCapture(0)
+    if not cap.isOpened(): raise SystemExit("No se pudo abrir la camara.")
+    W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
+    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
+
+    session_ts = time.strftime("%Y%m%d_%H%M%S")
+    base_dir = os.path.join("./dataset", person, f"session_{session_ts}")
+    os.makedirs(base_dir, exist_ok=True)
+
+    # video al tamaño original
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    vw = cv2.VideoWriter(os.path.join(base_dir, f"{person}_{session_ts}.mp4"), fourcc, fps, (W, H))
+
+    mesh = mp.solutions.face_mesh.FaceMesh(
+        static_image_mode=False, max_num_faces=1, refine_landmarks=False,
+        min_detection_confidence=0.5, min_tracking_confidence=0.5
+    )
+
+    WIN = "Captura"
+    cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(WIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    rx, ry, screen_w, screen_h = cv2.getWindowImageRect(WIN)
+
+    MIRROR, ROT180 = True, False
+    SHOW_DEBUG = False
+
+    saved, last_save, stable_since = 0, 0.0, None
+    PER_TOTAL = 80
+    MIN_INTERVAL = 0.30
+    STABLE_TIME = 0.30
+    CROP = 224
+
+    # relajacion progresiva si no hay capturas
+    last_capture_or_try = time.time()
+    widen = 1.0  # >=1; sube poco a poco
+    RELAX_EVERY = 6.0  # segundos sin capturar -> afloja
+    RELAX_STEP = 0.25  # cuanto afloja cada vez
+
+    while True:
+        ok, frame = cap.read()
+        if not ok: break
+        if MIRROR: frame = cv2.flip(frame, 1)
+        if ROT180: frame = cv2.rotate(frame, cv2.ROTATE_180)
+
+        vw.write(frame)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res = mesh.process(rgb)
+
+        label, strict_ok, soft_ok = ("buscando rostro", False, False)
+        bbox = None
+        yaw=pitch=ear_v=blur_v=bright=float('nan'); face_h=0
+
+        if res.multi_face_landmarks:
+            lms = res.multi_face_landmarks[0].landmark
+            x1,y1,x2,y2, face_h = bbox_from_lms(lms, W, H, m=0.16)
+            pts = lm_pts(lms, W, H)
+            face_crop = safe_crop(frame, x1,y1,x2,y2)
+
+            yaw   = yaw_ratio(pts)
+            pitch = pitch_ratio(pts, face_h)
+            ear_v = ear(pts)
+            blur_v = lap_var(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+            bright = mean_v(face_crop)
+            bbox = (x1,y1,x2,y2)
+
+            label, strict_ok, soft_ok = choose_instruction(
+                yaw, pitch, ear_v, blur_v, bright, face_h, H, widen=widen
+            )
+
+        # relajacion si no disparamos
+        now = time.time()
+        if now - last_capture_or_try > RELAX_EVERY:
+            widen += RELAX_STEP
+            last_capture_or_try = now
+
+        ready = strict_ok or soft_ok  # punto verde si al menos soft
+        # disparo si soft_ok y estable + intervalo
+        if soft_ok:
+            if stable_since is None:
+                stable_since = now
+            stable_ok = (now - stable_since) >= STABLE_TIME
+        else:
+            stable_since = None
+            stable_ok = False
+
+        can_shoot = (soft_ok and stable_ok and (now - last_save >= MIN_INTERVAL) and (saved < PER_TOTAL))
+
+        # captura manual con tecla C
+        manual_trigger = False
+
+        if (can_shoot or manual_trigger) and bbox is not None:
+            x1,y1,x2,y2 = bbox
+            crop = safe_crop(frame, x1,y1,x2,y2)
+            if crop is not None:
+                crop224 = cv2.resize(crop, (CROP, CROP), interpolation=cv2.INTER_AREA)
+                base = f"{person}_{int(now*1000)}"
+                cv2.imwrite(os.path.join(base_dir, base+"_raw.jpg"), frame)
+                cv2.imwrite(os.path.join(base_dir, base+"_224.jpg"), crop224)
+                last_save = now
+                last_capture_or_try = now
+                saved += 1
+                # al capturar, “endurece” un poco de nuevo
+                widen = max(1.0, widen - 0.15)
+
+        # render sin deformar
+        canvas, (x0, y0, new_w, new_h), s = make_letterboxed_canvas(frame, screen_w, screen_h)
+        top_h = max(60, int(new_h*0.12)); bot_h = max(50, int(new_h*0.10))
+        band(canvas, 0, top_h, 0.45); band(canvas, canvas.shape[0]-bot_h, bot_h, 0.45)
+        put_centered(canvas, label, int(top_h*0.65), scale=max(0.9, new_w/1400.0))
+        draw_dot(canvas, ready)
+        put_centered(canvas, f"{saved}/{PER_TOTAL}", canvas.shape[0]-int(bot_h*0.5), scale=max(0.8, new_w/1600.0), color=(220,220,255))
+
+        if bbox:
+            x1,y1,x2,y2 = bbox
+            x1 = x0 + int(x1 * s); x2 = x0 + int(x2 * s)
+            y1 = y0 + int(y1 * s); y2 = y0 + int(y2 * s)
+            cv2.rectangle(canvas, (x1,y1), (x2,y2), (0,200,0) if ready else (0,0,255), 2)
+
+        # debug opcional
+        if SHOW_DEBUG:
+            debug_lines = [
+                f"yaw={yaw:.3f}  pitch={pitch:.3f}  ear={ear_v:.3f}",
+                f"blur={blur_v:.1f}  V={bright:.1f}  widen={widen:.2f}",
+                f"soft_ok={soft_ok} strict_ok={strict_ok}"
+            ]
+            y = top_h + 24
+            for line in debug_lines:
+                cv2.putText(canvas, ascii_only(line), (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
+                y += 28
+
+        cv2.imshow(WIN, canvas)
+        k = cv2.waitKey(1) & 0xFF
+        if k in (ord('q'), ord('Q'), 27): break
+        elif k in (ord('m'), ord('M')): MIRROR = not MIRROR
+        elif k in (ord('r'), ord('R')): ROT180 = not ROT180
+        elif k in (ord('d'), ord('D')): SHOW_DEBUG = not SHOW_DEBUG
+        elif k in (ord('c'), ord('C')):  # captura manual
+            last_capture_or_try = time.time()
+            if bbox is not None:
+                x1,y1,x2,y2 = bbox
+                crop = safe_crop(frame, x1,y1,x2,y2)
+                if crop is not None:
+                    crop224 = cv2.resize(crop, (CROP, CROP), interpolation=cv2.INTER_AREA)
+                    base = f"{person}_{int(time.time()*1000)}"
+                    cv2.imwrite(os.path.join(base_dir, base+"_raw.jpg"), frame)
+                    cv2.imwrite(os.path.join(base_dir, base+"_224.jpg"), crop224)
+                    saved += 1
+
+        if saved >= PER_TOTAL:
             break
-        
-        if key == ord('c') and color == (0, 255, 0):
-            filePath = os.path.join(personDir, f"{currentPose['name']}.jpg")
-            cv2.imwrite(filePath, frameLimpio)
-            print(f"Foto guardada: {filePath}")
-            poseIdx += 1
-            
-            drawText(frameConGuias, "CAPTURADA!", (w//2 - 100, h//2), 1.5, (0,255,0), 3)
-            cv2.imshow("Captura Asistida", frameConGuias)
-            cv2.waitKey(750)
 
-    print(f"Proceso de captura para '{nombrePersona}' ha finalizado.")
-    cap.release()
+    cap.release(); vw.release()
     cv2.destroyAllWindows()
+    print("Sesion:", base_dir)
+
+if __name__ == "__main__":
+    main()
