@@ -1,0 +1,62 @@
+import os, cv2, numpy as np
+from keras_facenet import FaceNet
+
+# --- CONFIGURACIÓN ---
+DATASET_PATH = 'dataset_named'
+DB_PATH = 'database'
+DB_FILE = os.path.join(DB_PATH, 'embeddings_db.npz')
+
+# --- INICIALIZACIÓN ---
+embedder = FaceNet()
+if not os.path.exists(DB_PATH):
+    os.makedirs(DB_PATH)
+
+# --- LÓGICA DE ENTRENAMIENTO ---
+def entrenar_desde_cero():
+    embeddings_list = []
+    labels_list = []
+
+    if not os.path.exists(DATASET_PATH):
+        print(f"[ERROR] El directorio del dataset '{DATASET_PATH}' no existe.")
+        return
+
+    print("[INFO] Iniciando entrenamiento completo desde cero...")
+    print(f"[INFO] Escaneando '{DATASET_PATH}'...")
+
+    for person_name in os.listdir(DATASET_PATH):
+        person_folder = os.path.join(DATASET_PATH, person_name)
+        if not os.path.isdir(person_folder): continue
+
+        # Iterar sobre las sesiones de cada persona
+        for session_folder_name in os.listdir(person_folder):
+            session_folder = os.path.join(person_folder, session_folder_name)
+            if not os.path.isdir(session_folder): continue
+            
+            image_files = [f for f in os.listdir(session_folder) if f.endswith('_224.jpg')]
+            if not image_files: continue
+
+            print(f"  > Procesando a '{person_name}' de la sesión '{session_folder_name}'...")
+            for image_name in image_files:
+                image_path = os.path.join(session_folder, image_name)
+                try:
+                    image = cv2.imread(image_path)
+                    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    detections = embedder.extract(image_rgb, threshold=0.95)
+                    
+                    if len(detections) > 0:
+                        embeddings_list.append(detections[0]['embedding'])
+                        labels_list.append(person_name)
+                except Exception as e:
+                    print(f"  > [ERROR] Procesando {image_path}: {e}")
+
+    if not embeddings_list:
+        print("[ADVERTENCIA] No se generaron embeddings. El dataset podría estar vacío o las imágenes son inválidas.")
+        return
+
+    # Guardar la nueva base de datos
+    np.savez_compressed(DB_FILE, embeddings=np.asarray(embeddings_list), labels=np.asarray(labels_list))
+    print(f"\n[ÉXITO] Entrenamiento completo finalizado.")
+    print(f"Base de datos guardada en '{DB_FILE}' con {len(embeddings_list)} embeddings.")
+
+if __name__ == "__main__":
+    entrenar_desde_cero()

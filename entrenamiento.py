@@ -1,95 +1,86 @@
+# registrar_persona.py
+# Reqs: pip install keras-facenet numpy opencv-python
 import os
 import cv2
 import numpy as np
 from keras_facenet import FaceNet
-from sklearn.preprocessing import LabelEncoder
-from sklearn.svm import SVC
-import pickle
+# Importamos la función que modificamos en el otro archivo
+from capturarFotos import capturar_rostros
 
 # --- INICIALIZACIÓN ---
-# Carga el extractor de embeddings pre-entrenado FaceNet
 embedder = FaceNet()
+db_path = 'database'
+db_file = os.path.join(db_path, 'embeddings_db.npz')
 
-# Rutas
-dataset_path = 'dataset_named'
-trainer_path = 'trainer_facenet'
+# Crear la carpeta para la base de datos si no existe
+if not os.path.exists(db_path):
+    os.makedirs(db_path)
 
-# Verificar y crear la carpeta para guardar el modelo
-if not os.path.exists(trainer_path):
-    os.makedirs(trainer_path)
+# --- PASO 1: CAPTURAR LAS FOTOS DE LA NUEVA PERSONA ---
+person_name_raw = input("Introduce el nombre de la nueva persona a registrar: ")
+if not person_name_raw:
+    print("Nombre inválido. Abortando.")
+    exit()
 
-# --- PASO 1: CARGAR EL DATASET Y EXTRAER EMBEDDINGS ---
+# Normalizamos el nombre para usarlo como etiqueta
+person_name = person_name_raw.strip().lower().replace(" ", "_")
 
-# Listas para almacenar los embeddings y las etiquetas (nombres)
-embeddings_list = []
-labels_list = []
+# Llamamos a la función de captura
+session_path = capturar_rostros(person_name_raw)
 
-print("[INFO] Cargando dataset y extrayendo embeddings...")
+if not session_path:
+    print("La captura de fotos falló o fue cancelada. Abortando registro.")
+    exit()
 
-# Iterar sobre cada persona en el dataset
-for person_name in os.listdir(dataset_path):
-    person_folder = os.path.join(dataset_path, person_name)
-    
-    # Asegurarse de que es una carpeta
-    if not os.path.isdir(person_folder):
-        continue
+print(f"\n[INFO] Captura completada. Ahora procesando {session_path}...")
 
-    # Iterar sobre cada imagen de la persona
-    for image_name in os.listdir(person_folder):
-        image_path = os.path.join(person_folder, image_name)
+# --- PASO 2: EXTRAER EMBEDDINGS DE LAS NUEVAS FOTOS ---
+new_embeddings = []
+# Solo procesamos las imágenes .jpg de la sesión recién creada
+image_files = [f for f in os.listdir(session_path) if f.endswith('_224.jpg')]
+
+for image_name in image_files:
+    image_path = os.path.join(session_path, image_name)
+    try:
+        image = cv2.imread(image_path)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        try:
-            # Cargar la imagen usando OpenCV
-            image = cv2.imread(image_path)
-            # OpenCV carga en BGR, FaceNet espera RGB
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            
-            # FaceNet requiere una lista de caras. Extraemos la cara de la imagen.
-            # El método extract devuelve la caja delimitadora y el recorte de la cara
-            detections = embedder.extract(image_rgb, threshold=0.95)
-            
-            # Solo procesar si se detectó una cara con alta confianza
-            if len(detections) > 0:
-                # El embedding es el vector de 512 dimensiones (para este modelo de FaceNet)
-                embedding = detections[0]['embedding']
-                
-                # Añadir el embedding y el nombre de la persona a nuestras listas
-                embeddings_list.append(embedding)
-                labels_list.append(person_name)
-                print(f"  > Procesado {image_name} de {person_name}")
+        # El método extract de FaceNet detecta y extrae el embedding
+        detections = embedder.extract(image_rgb, threshold=0.95)
+        
+        if len(detections) > 0:
+            new_embeddings.append(detections[0]['embedding'])
+            print(f"  > Embedding generado para {image_name}")
+        else:
+            print(f"  > [ADVERTENCIA] No se detectó rostro en {image_name}")
 
-        except Exception as e:
-            print(f"[ADVERTENCIA] No se pudo procesar la imagen {image_path}. Error: {e}")
+    except Exception as e:
+        print(f"[ERROR] No se pudo procesar la imagen {image_path}. Error: {e}")
 
-# Convertir las listas a arrays de numpy para el entrenamiento
-X = np.asarray(embeddings_list)
-y = np.asarray(labels_list)
+if not new_embeddings:
+    print("\n[ERROR] No se pudo generar ningún embedding. Revisa la calidad de las fotos. Abortando.")
+    exit()
 
-print(f"[INFO] Se extrajeron {len(X)} embeddings.")
+# Creamos las etiquetas correspondientes para los nuevos embeddings
+new_labels = [person_name] * len(new_embeddings)
 
-# --- PASO 2: ENTRENAR EL CLASIFICADOR SVM ---
+# --- PASO 3: ACTUALIZAR LA BASE DE DATOS DE EMBEDDINGS ---
+if os.path.exists(db_file):
+    print(f"\n[INFO] Cargando base de datos existente de {db_file}...")
+    data = np.load(db_file)
+    existing_embeddings = data['embeddings']
+    existing_labels = data['labels']
+    
+    # Concatenar los embeddings y etiquetas existentes con los nuevos
+    all_embeddings = np.concatenate((existing_embeddings, np.asarray(new_embeddings)))
+    all_labels = np.concatenate((existing_labels, np.asarray(new_labels)))
+else:
+    print("\n[INFO] No se encontró base de datos. Creando una nueva...")
+    all_embeddings = np.asarray(new_embeddings)
+    all_labels = np.asarray(new_labels)
 
-# Codificar las etiquetas de texto (nombres) a números (0, 1, 2, ...)
-label_encoder = LabelEncoder()
-y_encoded = label_encoder.fit_transform(y)
+# Guardar la base de datos actualizada
+np.savez_compressed(db_file, embeddings=all_embeddings, labels=all_labels)
 
-# Crear y entrenar el clasificador SVM
-# 'probability=True' es necesario para obtener un score de confianza después
-print("\n[INFO] Entrenando el clasificador SVM...")
-svm_classifier = SVC(kernel='linear', probability=True)
-svm_classifier.fit(X, y_encoded)
-print("[INFO] Entrenamiento del clasificador finalizado.")
-
-
-# --- PASO 3: GUARDAR EL MODELO ENTRENADO Y EL CODIFICADOR DE ETIQUETAS ---
-
-# Guardar el clasificador SVM
-with open(os.path.join(trainer_path, 'svm_model.pkl'), 'wb') as f:
-    pickle.dump(svm_classifier, f)
-
-# Guardar el codificador de etiquetas
-with open(os.path.join(trainer_path, 'labels.pkl'), 'wb') as f:
-    pickle.dump(label_encoder, f)
-
-print(f"\n[ÉXITO] Modelo y etiquetas guardados en la carpeta '{trainer_path}'.")
-print("El sistema está listo para el reconocimiento en tiempo real.")
+print(f"\n[ÉXITO] {person_name_raw} ha sido añadido a la base de datos.")
+print(f"Total de embeddings en la base de datos: {len(all_embeddings)}")
