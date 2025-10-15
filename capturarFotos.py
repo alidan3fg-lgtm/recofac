@@ -8,6 +8,53 @@ try:
 except ImportError:
     raise SystemExit("Falta mediapipe. Instala con: pip install mediapipe")
 
+# ---------- Definición de Poses de Captura ----------
+POSES = [
+    # 20 Frente
+    {"name": "Frente", "photos": 20, "msg": "Mira de frente", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    # 20 Izquierda (4 etapas x 5 fotos)
+    {"name": "Izq_1", "photos": 5, "msg": "Gira un poco a tu izquierda", "config": {
+        "yaw_center": (1.04, 1.15), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Izq_2", "photos": 5, "msg": "Gira mas a tu izquierda", "config": {
+        "yaw_center": (1.16, 1.28), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Izq_3", "photos": 5, "msg": "Un poco mas a la izquierda", "config": {
+        "yaw_center": (1.29, 1.42), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Izq_4", "photos": 5, "msg": "Casi de perfil izquierdo", "config": {
+        "yaw_center": (1.43, 1.60), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    # 20 Derecha (4 etapas x 5 fotos)
+    {"name": "Der_1", "photos": 5, "msg": "Gira un poco a tu derecha", "config": {
+        "yaw_center": (0.85, 0.94), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Der_2", "photos": 5, "msg": "Gira mas a tu derecha", "config": {
+        "yaw_center": (0.75, 0.84), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Der_3", "photos": 5, "msg": "Un poco mas a la derecha", "config": {
+        "yaw_center": (0.65, 0.74), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    {"name": "Der_4", "photos": 5, "msg": "Casi de perfil derecho", "config": {
+        "yaw_center": (0.55, 0.64), "pitch_soft": (0.24, 0.40), "ear_min": 0.22}},
+    # 20 Arriba (4 etapas x 5 fotos)
+    {"name": "Arr_1", "photos": 5, "msg": "Mira un poco hacia arriba", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.41, 0.46), "ear_min": 0.18}},
+    {"name": "Arr_2", "photos": 5, "msg": "Un poco mas arriba", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.47, 0.53), "ear_min": 0.18}},
+    {"name": "Arr_3", "photos": 5, "msg": "Sigue mirando hacia arriba", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.54, 0.60), "ear_min": 0.16}},
+    {"name": "Arr_4", "photos": 5, "msg": "Lo mas arriba que puedas", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.61, 0.70), "ear_min": 0.16}},
+    # 20 Abajo (4 etapas x 5 fotos)
+    {"name": "Aba_1", "photos": 5, "msg": "Mira un poco hacia abajo", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.18, 0.23), "ear_min": 0.22}},
+    {"name": "Aba_2", "photos": 5, "msg": "Un poco mas abajo", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.13, 0.17), "ear_min": 0.22}},
+    {"name": "Aba_3", "photos": 5, "msg": "Sigue mirando hacia abajo", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.09, 0.12), "ear_min": 0.20}},
+    {"name": "Aba_4", "photos": 5, "msg": "Lo mas abajo que puedas", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.05, 0.08), "ear_min": 0.20}},
+    # 5 Ojos cerrados
+    {"name": "Cerrados", "photos": 5, "msg": "Ahora, cierra los ojos", "config": {
+        "yaw_center": (0.95, 1.03), "pitch_soft": (0.24, 0.40), "ear_max": 0.18, "ear_min": 0.0}},
+]
+
+
 # ---------- helpers visuales ----------
 def ascii_only(s: str) -> str:
     table = str.maketrans("áéíóúñÁÉÍÓÚÑ", "aeiounAEIOUN")
@@ -72,13 +119,17 @@ def ear(pts):
 def yaw_ratio(pts):
     lw = eu(pts[L_OUT],pts[L_IN])+1e-6
     rw = eu(pts[R_OUT],pts[R_IN])+1e-6
-    return float(rw/lw) # >1 derecha, <1 izquierda
+    # ratio > 1: cabeza girada a la IZQUIERDA del usuario
+    # ratio < 1: cabeza girada a la DERECHA del usuario
+    return float(rw/lw)
 
 def pitch_ratio(pts, face_h):
     lc = ((pts[L_OUT][0]+pts[L_IN][0])//2, (pts[L_UP][1]+pts[L_DN][1])//2)
     rc = ((pts[R_OUT][0]+pts[R_IN][0])//2, (pts[R_UP][1]+pts[R_DN][1])//2)
     ec = ((lc[0]+rc[0])//2, (lc[1]+rc[1])//2)
     mc = ((pts[M_UP][0]+pts[M_DN][0])//2, (pts[M_UP][1]+pts[M_DN][1])//2)
+    # ratio > ~0.3: mirando ARRIBA
+    # ratio < ~0.3: mirando ABAJO
     return float(abs(mc[1]-ec[1]) / max(1.0, face_h))
 
 def bbox_from_lms(lms,w,h,m=0.16):
@@ -89,55 +140,57 @@ def bbox_from_lms(lms,w,h,m=0.16):
     x2 = min(w-1,int(x2+bw*m)); y2=min(h-1,int(y2+bh*m))
     return x1,y1,x2,y2,bh
 
-# ---------- objetivos base (MÁS ESTRICTOS) ----------
-BASE = {
-    "yaw_center": (0.95, 1.03),  # Rango de giro de cara más cerrado
-    "pitch_soft": (0.24, 0.40),  # Rango de inclinación de cara más cerrado
-    "ear_min": 0.22,           # Ojos más abiertos
-    "blur_min": 60.0,          # Imagen más nítida (menos borrosa)
-    "v_min": 70.0,             # Rango de brillo más estricto
+# ---------- Calidad de imagen base ----------
+BASE_QUALITY = {
+    "blur_min": 60.0,
+    "v_min": 70.0,
     "v_max": 220.0,
-    "face_frac": (0.22, 0.45)  # Distancia a la cámara más controlada
+    "face_frac": (0.22, 0.45)
 }
 
 def human_delta(value, lo, hi, kind):
-    """Devuelve instruccion precisa y cuanto falta"""
+    """Devuelve instruccion de ajuste para el usuario."""
     if value!=value: return ""
     if value < lo:
-        if kind == "yaw":   return f"gira a tu {'izquierda' if value<1 else 'izquierda'}"
-        if kind == "pitch": return f"mira un poco arriba"
+        if kind == "yaw": return "gira a tu izquierda"
+        if kind == "pitch": return "mira un poco arriba"
     if value > hi:
-        if kind == "yaw":   return f"gira a tu derecha"
-        if kind == "pitch": return f"mira un poco abajo"
+        if kind == "yaw": return "gira a tu derecha"
+        if kind == "pitch": return "mira un poco abajo"
     return ""
 
-def choose_instruction(yaw, pitch, ear_v, blur_v, bright, face_h, H):
-    # Usamos directamente los valores de BASE sin relajación
-    yaw_lo, yaw_hi = BASE["yaw_center"]
-    pit_lo, pit_hi = BASE["pitch_soft"]
-    ear_min  = BASE["ear_min"]
-    blur_min = BASE["blur_min"]
-    v_min    = BASE["v_min"]
-    v_max    = BASE["v_max"]
-    frac_lo, frac_hi = BASE["face_frac"]
+def choose_instruction(pose_config, quality_config, yaw, pitch, ear_v, blur_v, bright, face_h, H):
+    # Requisitos de la pose actual
+    yaw_lo, yaw_hi = pose_config.get("yaw_center", (-1e6, 1e6))
+    pit_lo, pit_hi = pose_config.get("pitch_soft", (-1e6, 1e6))
+    ear_min = pose_config.get("ear_min", -1e6)
+    ear_max = pose_config.get("ear_max", 1e6)
 
-    # calidad
+    # Requisitos de calidad
+    blur_min = quality_config["blur_min"]
+    v_min, v_max = quality_config["v_min"], quality_config["v_max"]
+    frac_lo, frac_hi = quality_config["face_frac"]
+
+    # Calidad de imagen
     quality_ok = True
     msg_quality = []
-    if ear_v==ear_v and ear_v < ear_min:
-        quality_ok = False; msg_quality.append("abre bien los ojos")
+    if ear_v==ear_v:
+        if ear_v < ear_min:
+            quality_ok = False; msg_quality.append("abre bien los ojos")
+        if ear_v > ear_max: # Para el caso de ojos cerrados
+            quality_ok = False; msg_quality.append("cierra los ojos")
     if blur_v < blur_min:
         quality_ok = False; msg_quality.append("no te muevas")
     if bright==bright and (bright < v_min or bright > v_max):
         quality_ok = False; msg_quality.append("mejora la iluminacion")
 
-    # distancia
+    # Distancia
     dist_ok = True
     frac = face_h / max(1.0, H) if H>0 else 0
     if frac < frac_lo: dist_ok = False; msg_quality.append("acercate un poco")
     if frac > frac_hi: dist_ok = False; msg_quality.append("alejate un poco")
 
-    # orientacion
+    # Orientacion
     orient_ok = True
     orient_msg = ""
     if yaw==yaw and (yaw < yaw_lo or yaw > yaw_hi):
@@ -146,11 +199,11 @@ def choose_instruction(yaw, pitch, ear_v, blur_v, bright, face_h, H):
     if pitch==pitch and (pitch < pit_lo or pitch > pit_hi):
         orient_ok = False
         m = human_delta(pitch, pit_lo, pit_hi, "pitch")
-        orient_msg = (orient_msg + " " + m).strip()
+        orient_msg = (orient_msg + " y " + m).strip() if orient_msg else m
 
-    # mensaje final
+    # Mensaje final
     if not orient_ok:
-        label = orient_msg or "centra tu rostro"
+        label = orient_msg or "coloca tu rostro en posicion"
     elif not dist_ok:
         label = ", ".join(msg_quality)
     elif not quality_ok:
@@ -158,9 +211,7 @@ def choose_instruction(yaw, pitch, ear_v, blur_v, bright, face_h, H):
     else:
         label = "perfecto, manten la posicion"
 
-    # criterio de captura: solo estricto
     strict_pass = orient_ok and quality_ok and dist_ok
-
     return label, strict_pass
 
 def main():
@@ -180,37 +231,54 @@ def main():
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     vw = cv2.VideoWriter(os.path.join(base_dir, f"{person}_{session_ts}.mp4"), fourcc, fps, (W, H))
 
-    mesh = mp.solutions.face_mesh.FaceMesh(
-        static_image_mode=False, max_num_faces=1, refine_landmarks=False,
-        min_detection_confidence=0.5, min_tracking_confidence=0.5
-    )
+    mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True,
+        min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     WIN = "Captura"
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(WIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     rx, ry, screen_w, screen_h = cv2.getWindowImageRect(WIN)
 
-    MIRROR, ROT180 = True, False
-    SHOW_DEBUG = False
+    MIRROR, ROT180, SHOW_DEBUG = True, False, False
+    
+    # --- State Management ---
+    pose_idx = 0
+    saved_for_pose = 0
+    if not POSES: raise SystemExit("La lista de POSES esta vacia.")
+    current_pose = POSES[pose_idx]
+    PER_TOTAL = sum(p['photos'] for p in POSES)
 
     saved, last_save, stable_since = 0, 0.0, None
-    PER_TOTAL = 80
-    MIN_INTERVAL = 0.40 # Intervalo mínimo un poco mayor
-    STABLE_TIME = 0.50  # Requiere más tiempo de estabilidad
+    MIN_INTERVAL = 0.40
+    STABLE_TIME = 0.50
     CROP = 224
 
-    while True:
+    last_pose_switch_time = time.time()
+    MIN_POSE_MSG_TIME = 2.0 # Mostrar instrucción principal por 2 segs
+
+    while saved < PER_TOTAL:
         ok, frame = cap.read()
         if not ok: break
         if MIRROR: frame = cv2.flip(frame, 1)
         if ROT180: frame = cv2.rotate(frame, cv2.ROTATE_180)
 
         vw.write(frame)
+        now = time.time()
+
+        # Chequear si se debe cambiar de pose
+        if saved_for_pose >= current_pose["photos"]:
+            pose_idx += 1
+            if pose_idx < len(POSES):
+                saved_for_pose = 0
+                current_pose = POSES[pose_idx]
+                last_pose_switch_time = now
+            else:
+                break # Terminado
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = mesh.process(rgb)
 
-        label, is_ready = ("buscando rostro...", False)
+        fine_tune_label, is_ready = ("buscando rostro...", False)
         bbox = None
         yaw=pitch=ear_v=blur_v=bright=float('nan'); face_h=0
 
@@ -220,91 +288,108 @@ def main():
             pts = lm_pts(lms, W, H)
             face_crop = safe_crop(frame, x1,y1,x2,y2)
 
-            yaw   = yaw_ratio(pts)
-            pitch = pitch_ratio(pts, face_h)
-            ear_v = ear(pts)
+            yaw, pitch, ear_v = yaw_ratio(pts), pitch_ratio(pts, face_h), ear(pts)
             blur_v = lap_var(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
             bright = mean_v(face_crop)
             bbox = (x1,y1,x2,y2)
 
-            label, is_ready = choose_instruction(
-                yaw, pitch, ear_v, blur_v, bright, face_h, H
-            )
-        
-        now = time.time()
-        
-        # Disparo solo si `is_ready` (modo estricto) y ha estado estable.
-        # Si la posición no es correcta, se detiene el contador de estabilidad.
+            fine_tune_label, is_ready = choose_instruction(
+                current_pose["config"], BASE_QUALITY, yaw, pitch, ear_v, blur_v, bright, face_h, H)
+
+        # Lógica de estabilidad y disparo
         if is_ready:
-            if stable_since is None:
-                stable_since = now
+            if stable_since is None: stable_since = now
             stable_ok = (now - stable_since) >= STABLE_TIME
         else:
-            stable_since = None # Se reinicia si la persona se mueve de la posición correcta
+            stable_since = None
             stable_ok = False
 
-        can_shoot = (is_ready and stable_ok and (now - last_save >= MIN_INTERVAL) and (saved < PER_TOTAL))
+        can_shoot = (is_ready and stable_ok and (now - last_save >= MIN_INTERVAL))
 
         if can_shoot and bbox is not None:
-            x1,y1,x2,y2 = bbox
-            crop = safe_crop(frame, x1,y1,x2,y2)
+            crop = safe_crop(frame, *bbox)
             if crop is not None:
                 crop224 = cv2.resize(crop, (CROP, CROP), interpolation=cv2.INTER_AREA)
-                base = f"{person}_{int(now*1000)}"
-                # Guardamos la foto recortada y la original para referencia
+                base = f"{person}_{current_pose['name']}_{int(now*1000)}"
                 cv2.imwrite(os.path.join(base_dir, base+"_raw.jpg"), frame)
                 cv2.imwrite(os.path.join(base_dir, base+"_224.jpg"), crop224)
                 last_save = now
                 saved += 1
-                stable_since = None # Reiniciar estabilidad tras captura para forzar nueva pose
+                saved_for_pose += 1
+                stable_since = None
 
-        # Renderizado de la interfaz
+        # --- Renderizado ---
         canvas, (x0, y0, new_w, new_h), s = make_letterboxed_canvas(frame, screen_w, screen_h)
         top_h = max(60, int(new_h*0.12)); bot_h = max(50, int(new_h*0.10))
         band(canvas, 0, top_h, 0.45); band(canvas, canvas.shape[0]-bot_h, bot_h, 0.45)
+
+        # Lógica de mensajes en pantalla
+        if is_ready:
+            label = "perfecto, manten la posicion"
+        elif (now - last_pose_switch_time) < MIN_POSE_MSG_TIME:
+            label = current_pose["msg"]
+        else:
+            label = fine_tune_label
+
         put_centered(canvas, label, int(top_h*0.65), scale=max(0.9, new_w/1400.0))
-        draw_dot(canvas, is_ready) # El punto ahora es rojo o verde según 'is_ready'
-        put_centered(canvas, f"{saved}/{PER_TOTAL}", canvas.shape[0]-int(bot_h*0.5), scale=max(0.8, new_w/1600.0), color=(220,220,255))
+        draw_dot(canvas, is_ready)
+        
+        progress_text = f"{current_pose['msg']} ({saved_for_pose}/{current_pose['photos']}) - Total: {saved}/{PER_TOTAL}"
+        put_centered(canvas, progress_text, canvas.shape[0]-int(bot_h*0.5), scale=max(0.8, new_w/1600.0), color=(220,220,255))
 
         if bbox:
             x1,y1,x2,y2 = bbox
-            x1 = x0 + int(x1 * s); x2 = x0 + int(x2 * s)
-            y1 = y0 + int(y1 * s); y2 = y0 + int(y2 * s)
+            x1, x2 = x0 + int(x1 * s), x0 + int(x2 * s)
+            y1, y2 = y0 + int(y1 * s), y0 + int(y2 * s)
             color = (0, 255, 0) if is_ready else (0, 0, 255)
             cv2.rectangle(canvas, (x1,y1), (x2,y2), color, 2)
 
         if SHOW_DEBUG:
-            debug_lines = [
-                f"yaw={yaw:.3f}  pitch={pitch:.3f}  ear={ear_v:.3f}",
-                f"blur={blur_v:.1f}  V={bright:.1f}",
-                f"READY={is_ready} stable_for={(now-stable_since) if stable_since else 0:.2f}s"
-            ]
+            debug_lines = [ f"POSE: {current_pose['name']}", f"yaw={yaw:.2f} pitch={pitch:.2f} ear={ear_v:.2f}",
+                f"blur={blur_v:.1f} V={bright:.1f}", f"READY={is_ready} stable={(now-stable_since) if stable_since else 0:.1f}s"]
             y = top_h + 24
             for line in debug_lines:
-                cv2.putText(canvas, ascii_only(line), (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
+                cv2.putText(canvas, ascii_only(line), (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2, cv2.LINE_AA)
                 y += 28
 
         cv2.imshow(WIN, canvas)
+        
+        # --- Controles de Teclado ---
         k = cv2.waitKey(1) & 0xFF
-        if k in (ord('q'), ord('Q'), 27): break
-        elif k in (ord('m'), ord('M')): MIRROR = not MIRROR
-        elif k in (ord('r'), ord('R')): ROT180 = not ROT180
-        elif k in (ord('d'), ord('D')): SHOW_DEBUG = not SHOW_DEBUG
-        elif k == ord('c') and bbox is not None: # Captura manual
-            x1,y1,x2,y2 = bbox
-            crop = safe_crop(frame, x1,y1,x2,y2)
-            if crop is not None:
-                crop224 = cv2.resize(crop, (CROP, CROP), interpolation=cv2.INTER_AREA)
-                base = f"{person}_{int(time.time()*1000)}_manual"
-                cv2.imwrite(os.path.join(base_dir, base+"_224.jpg"), crop224)
-                saved += 1
-
-
-        if saved >= PER_TOTAL:
-            put_centered(canvas, "Completado!", int(screen_h/2), scale=1.5)
-            cv2.imshow(WIN, canvas)
-            cv2.waitKey(2000)
+        if k == 27: # 'Esc' es la ÚNICA tecla para salir
             break
+        elif k in (ord('m'), ord('M')):
+            MIRROR = not MIRROR
+        elif k in (ord('r'), ord('R')):
+            ROT180 = not ROT180
+        elif k in (ord('d'), ord('D')):
+            SHOW_DEBUG = not SHOW_DEBUG
+        elif k in (ord('q'), ord('Q')) and bbox is not None: # 'q' para Captura Manual
+            crop = safe_crop(frame, *bbox)
+            if crop is not None:
+                print("¡Captura manual!")
+                crop224 = cv2.resize(crop, (CROP, CROP), interpolation=cv2.INTER_AREA)
+                base = f"{person}_{current_pose['name']}_{int(now*1000)}_manual"
+                
+                # Guardamos la foto
+                cv2.imwrite(os.path.join(base_dir, base+"_raw.jpg"), frame)
+                cv2.imwrite(os.path.join(base_dir, base+"_224.jpg"), crop224)
+                
+                # Incrementamos contadores como si fuera una captura automática
+                last_save = now
+                saved += 1
+                saved_for_pose += 1
+                stable_since = None # Reiniciar estabilidad
+
+    # Usamos una imagen negra para el mensaje final
+    canvas = np.zeros((screen_h, screen_w, 3), dtype=np.uint8)
+    if saved >= PER_TOTAL:
+        put_centered(canvas, "Completado!", int(screen_h/2), scale=1.5)
+    else:
+        put_centered(canvas, "Captura interrumpida", int(screen_h/2), scale=1.5)
+    
+    cv2.imshow(WIN, canvas)
+    cv2.waitKey(3000)
 
     cap.release(); vw.release()
     cv2.destroyAllWindows()
