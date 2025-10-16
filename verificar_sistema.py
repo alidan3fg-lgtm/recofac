@@ -1,4 +1,3 @@
-# verificar_sistema.py
 import os, cv2, numpy as np
 from keras_facenet import FaceNet
 from scipy.spatial.distance import cosine
