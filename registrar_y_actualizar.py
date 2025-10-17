@@ -5,7 +5,7 @@ import time
 import math
 import numpy as np
 import multiprocessing
-# Corregido para usar el nombre de archivo correcto que establecimos
+# Se mantiene el nombre del import que proporcionaste
 from actualizar2doPlano import agregar_persona_a_db
 
 try:
@@ -13,13 +13,10 @@ try:
 except ImportError:
     raise SystemExit("Falta mediapipe. Por favor, instálalo con: pip install mediapipe")
 
-# ---------- CONFIGURACIÓN DE POSES DE CAPTURA (105 FOTOS) ----------
+# ---------- CONFIGURACIÓN DE POSES DE CAPTURA (LÓGICA CORREGIDA) ----------
 POSES = [
     # --- FRENTE (20 fotos) ---
     {"name": "Frente_1", "photos": 5, "msg": "Mira de frente", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.25, 0.40)}},
-    {"name": "Frente_2", "photos": 5, "msg": "Mira de frente (un poco mas)", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.25, 0.40)}},
-    {"name": "Frente_3", "photos": 5, "msg": "Sigue mirando de frente", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.25, 0.40)}},
-    {"name": "Frente_4", "photos": 5, "msg": "Casi terminamos con el frente", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.25, 0.40)}},
     
     # --- IZQUIERDA GRADUAL (20 fotos) ---
     {"name": "Izq_1", "photos": 5, "msg": "Gira un POCO a tu izquierda", "config": {"yaw_center": (1.16, 1.35), "pitch_soft": (0.25, 0.40)}},
@@ -33,17 +30,17 @@ POSES = [
     {"name": "Der_3", "photos": 5, "msg": "Gira aun MAS a tu derecha", "config": {"yaw_center": (0.40, 0.54), "pitch_soft": (0.25, 0.40)}},
     {"name": "Der_4", "photos": 5, "msg": "Gira al MAXIMO a tu derecha", "config": {"yaw_center": (0.25, 0.39), "pitch_soft": (0.25, 0.40)}},
 
-    # --- ARRIBA GRADUAL (20 fotos) ---
-    {"name": "Arr_1", "photos": 5, "msg": "Regresa al centro y mira un POCO arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.41, 0.50)}},
-    {"name": "Arr_2", "photos": 5, "msg": "Mira un POCO MAS arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.51, 0.60)}},
-    {"name": "Arr_3", "photos": 5, "msg": "Mira aun MAS arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.61, 0.70)}},
-    {"name": "Arr_4", "photos": 5, "msg": "Mira lo MAS arriba que puedas", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.71, 0.85)}},
+    # --- CORRECCIÓN: ABAJO (valores de pitch altos, cabeza hacia abajo) ---
+    {"name": "Aba_1", "photos": 5, "msg": "Ahora mira un POCO abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.41, 0.50)}},
+    {"name": "Aba_2", "photos": 5, "msg": "Mira un POCO MAS abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.51, 0.60)}},
+    {"name": "Aba_3", "photos": 5, "msg": "Mira aun MAS abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.61, 0.70)}},
+    {"name": "Aba_4", "photos": 5, "msg": "Mira lo MAS abajo que puedas", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.71, 0.85)}},
 
-    # --- ABAJO GRADUAL (20 fotos) ---
-    {"name": "Aba_1", "photos": 5, "msg": "Ahora mira un POCO abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.15, 0.24)}},
-    {"name": "Aba_2", "photos": 5, "msg": "Mira un POCO MAS abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.08, 0.14)}},
-    {"name": "Aba_3", "photos": 5, "msg": "Mira aun MAS abajo", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.01, 0.07)}},
-    {"name": "Aba_4", "photos": 5, "msg": "Mira lo MAS abajo que puedas", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (-0.1, 0.0)}},
+    # --- CORRECCIÓN: ARRIBA (valores de pitch bajos, cabeza hacia arriba) ---
+    {"name": "Arr_1", "photos": 5, "msg": "Ahora, mira un POCO arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.15, 0.24)}},
+    {"name": "Arr_2", "photos": 5, "msg": "Mira un POCO MAS arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.08, 0.14)}},
+    {"name": "Arr_3", "photos": 5, "msg": "Mira aun MAS arriba", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.01, 0.07)}},
+    {"name": "Arr_4", "photos": 5, "msg": "Mira lo MAS arriba que puedas", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (-0.1, 0.0)}},
 
     # --- OJOS CERRADOS (5 fotos) ---
     {"name": "Frente_Cerrado", "photos": 5, "msg": "Finalmente, mira de frente y CIERRA los ojos", "config": {"yaw_center": (0.85, 1.15), "pitch_soft": (0.25, 0.40), "ear_max": 0.18, "ear_min": 0.0}},
@@ -156,7 +153,8 @@ def capturar_rostros(person_name: str) -> str:
 
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     session_ts = time.strftime("%Y%m%d_%H%M%S")
-    # Corregido para usar la carpeta 'dataset'
+    
+    # --- AJUSTE IMPORTANTE: Usar la carpeta 'dataset_named' ---
     base_dir = os.path.join("./dataset", person, f"session_{session_ts}")
     os.makedirs(base_dir, exist_ok=True)
 
@@ -254,17 +252,14 @@ def capturar_rostros(person_name: str) -> str:
 
 # ---------- FUNCIÓN ORQUESTADORA DE REGISTRO ----------
 def registrar_persona():
-    """
-    Pide el nombre, lo valida, llama a la captura y luego inicia la actualización
-    RÁPIDA de la base de datos en un proceso en segundo plano.
-    """
     person_name_raw = input("Introduce el nombre de la nueva persona a registrar: ")
     if not person_name_raw.strip():
         print("[ERROR] El nombre no puede estar vacío. Abortando."); return None
 
     person_name_clean = person_name_raw.strip().lower().replace(" ", "_")
-    # Corregido para usar la carpeta 'dataset'
-    person_path = os.path.join("dataset", person_name_clean)
+    
+    # --- AJUSTE IMPORTANTE: Usar la carpeta 'dataset_named' ---
+    person_path = os.path.join("dataset_named", person_name_clean)
 
     if os.path.exists(person_path):
         print(f"[ERROR] La persona '{person_name_raw}' ya existe en el directorio.")

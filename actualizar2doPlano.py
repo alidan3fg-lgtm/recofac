@@ -1,4 +1,3 @@
-# actualizar_db_en_segundo_plano.py
 import os
 import cv2
 import numpy as np
@@ -17,17 +16,11 @@ except Exception as e:
     print(f"[ERROR CRÍTICO] No se pudo cargar el modelo FaceNet. Error: {e}")
     embedder = None
 
-# ==============================================================================
-# FUNCIÓN 1: AGREGAR PERSONA (MÉTODO RÁPIDO)
-# ==============================================================================
 def agregar_persona_a_db(session_path, person_name):
-    """
-    Procesa solo las imágenes de una nueva sesión y las AÑADE a la DB existente.
-    """
     if not embedder:
-        print(f"[{time.strftime('%H:%M:%S')}] ERROR: Modelo FaceNet no está disponible."); return
+        print(f"[{time.strftime('%H:%M:%S')}] ERROR: Modelo FaceNet no disponible."); return
 
-    print(f"[{time.strftime('%H:%M:%S')}] INICIO (Rápido): Agregando a '{person_name}' a la base de datos...")
+    print(f"[{time.strftime('%H:%M:%S')}] INICIO: Agregando a '{person_name}' a la base de datos...")
     
     new_embeddings = []
     image_files = [f for f in os.listdir(session_path) if f.endswith('_224.jpg')]
@@ -48,29 +41,33 @@ def agregar_persona_a_db(session_path, person_name):
 
     new_labels = [person_name] * len(new_embeddings)
 
+    # --- LÓGICA CLAVE ---
+    # 1. VERIFICAR SI LA BASE DE DATOS YA EXISTE
     if os.path.exists(DB_FILE):
+        print(f"[{time.strftime('%H:%M:%S')}] Base de datos existente encontrada. Cargando registros...")
+        # 2. CARGAR LOS DATOS ANTIGUOS
         data = np.load(DB_FILE)
         existing_embeddings = data['embeddings']
         existing_labels = data['labels']
+        
+        # 3. COMBINAR DATOS ANTIGUOS Y NUEVOS
         all_embeddings = np.concatenate((existing_embeddings, np.asarray(new_embeddings)))
         all_labels = np.concatenate((existing_labels, np.asarray(new_labels)))
     else:
+        # SI NO EXISTE, SE CREA CON LOS DATOS NUEVOS
+        print(f"[{time.strftime('%H:%M:%S')}] No se encontró base de datos. Creando una nueva...")
         all_embeddings = np.asarray(new_embeddings)
         all_labels = np.asarray(new_labels)
 
     if not os.path.exists(DB_PATH):
         os.makedirs(DB_PATH)
+        
+    # 4. GUARDAR EL ARCHIVO ACTUALIZADO Y COMBINADO
     np.savez_compressed(DB_FILE, embeddings=all_embeddings, labels=all_labels)
     
     print(f"[{time.strftime('%H:%M:%S')}] ÉXITO: '{person_name}' agregado. Total de registros ahora: {len(all_labels)}")
 
-# ==============================================================================
-# FUNCIÓN 2: ELIMINAR PERSONA (MÉTODO RÁPIDO)
-# ==============================================================================
 def eliminar_persona_de_db(person_name_to_delete):
-    """
-    Carga la DB, elimina todas las entradas de una persona y la vuelve a guardar.
-    """
     print(f"[{time.strftime('%H:%M:%S')}] INICIO (Rápido): Eliminando a '{person_name_to_delete}'...")
 
     if not os.path.exists(DB_FILE):
@@ -96,13 +93,7 @@ def eliminar_persona_de_db(person_name_to_delete):
     np.savez_compressed(DB_FILE, embeddings=nuevos_embeddings, labels=nuevas_etiquetas)
     print(f"[{time.strftime('%H:%M:%S')}] ÉXITO: Se eliminaron {eliminados_count} registros. Total restante: {len(nuevas_etiquetas)}")
 
-# ==============================================================================
-# FUNCIÓN 3: RECONSTRUIR TODO (MÉTODO LENTO Y SEGURO)
-# ==============================================================================
 def reconstruir_db_completa():
-    """
-    Método de respaldo. Escanea todo 'dataset_named' y crea la DB desde cero.
-    """
     if not embedder:
         print(f"[{time.strftime('%H:%M:%S')}] ERROR: Modelo FaceNet no está disponible."); return
 
