@@ -1,0 +1,1 @@
+2025-10-21T10:11:44 | 2025-10-21T10:11:57 | luis | duration_s=13.274 | verified=0 | frames=8 | min_dist=0.121174 | avg_dist=0.182418 | res=1280x720 | avg_fps=1.10
