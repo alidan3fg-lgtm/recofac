@@ -154,7 +154,7 @@ def capturar_rostros(person_name: str) -> str:
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     session_ts = time.strftime("%Y%m%d_%H%M%S")
     
-    # --- AJUSTE IMPORTANTE: Usar la carpeta 'dataset_named' ---
+    # --- AJUSTE IMPORTANTE: Usar la carpeta 'dataset' ---
     base_dir = os.path.join("./dataset", person, f"session_{session_ts}")
     os.makedirs(base_dir, exist_ok=True)
 
@@ -250,34 +250,40 @@ def capturar_rostros(person_name: str) -> str:
     cv2.destroyAllWindows()
     return base_dir if saved >= PER_TOTAL else None
 
-# ---------- FUNCIÓN ORQUESTADORA DE REGISTRO ----------
-def registrar_persona():
-    person_name_raw = input("Introduce el nombre de la nueva persona a registrar: ")
+# ---------- FUNCIÓN ORQUESTADORA DE REGISTRO MODIFICADA ----------
+def registrar_persona(person_name_raw: str):
+    """
+    Inicia el proceso de captura de rostros y la actualización de la base de datos.
+    Recibe el nombre como parámetro para evitar la interacción por consola.
+    """
     if not person_name_raw.strip():
-        print("[ERROR] El nombre no puede estar vacío. Abortando."); return None
+        # Devolvemos un error que la GUI puede manejar
+        return None, "[ERROR] El nombre no puede estar vacío."
 
+    # Usamos un nombre limpio para el directorio y DB
     person_name_clean = person_name_raw.strip().lower().replace(" ", "_")
     
-    # --- AJUSTE IMPORTANTE: Usar la carpeta 'dataset_named' ---
-    person_path = os.path.join("dataset_named", person_name_clean)
+    # Ruta consistente con el guardado en capturar_rostros
+    person_path = os.path.join("dataset", person_name_clean) 
 
     if os.path.exists(person_path):
-        print(f"[ERROR] La persona '{person_name_raw}' ya existe en el directorio.")
-        print("Por favor, elige otro nombre o elimina la carpeta existente primero."); return None
+        return None, f"[ERROR] La persona '{person_name_raw}' ya existe en el directorio."
 
+    # 1. Ejecutar la captura
     session_path = capturar_rostros(person_name_raw)
-    if not session_path:
-        print("\nLa captura de fotos falló o fue cancelada. No se actualizará la base de datos."); return None
-
-    print(f"\n[INFO] Captura para '{person_name_raw}' completada.")
-    print("[INFO] Iniciando actualización de la base de datos en segundo plano (método rápido)...")
     
+    if not session_path:
+        return None, "\n[ERROR] La captura de fotos falló o fue cancelada."
+
+    # 2. Iniciar el proceso de actualización en segundo plano
     proceso = multiprocessing.Process(
         target=agregar_persona_a_db,
         args=(session_path, person_name_clean)
     )
     proceso.start()
-    return proceso
+    
+    # Devolvemos el proceso y un mensaje de éxito
+    return proceso, f"[INFO] Captura para '{person_name_raw}' completada."
 
 if __name__ == "__main__":
-    print("Este script es un módulo. Ejecuta 'main.py' para usar esta función.")
+    print("Este script es un módulo. Ejecuta 'app_gui.py' para usar esta función.")
