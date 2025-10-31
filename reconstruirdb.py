@@ -1,4 +1,3 @@
-# archivo unicamente para reconstruir la base de datos por si se corrompe o se pierde
 import os
 import cv2
 import numpy as np

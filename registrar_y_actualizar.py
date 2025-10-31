@@ -1,4 +1,3 @@
-# registrar_y_actualizar.py
 import os
 import cv2
 import time
