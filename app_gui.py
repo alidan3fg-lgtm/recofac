@@ -26,8 +26,6 @@ def verify_worker(db_path: str): # Solo recibe la ruta de la DB
     """Función de trabajador para la verificación en vivo."""
     import numpy as np
     import os
-    # NOTA IMPORTANTE: FaceNet es pesado, lo importamos y cargamos en el proceso hijo
-    # para evitar problemas de serialización y asegurar la separación de memoria.
     try:
         from keras_facenet import FaceNet
     except ImportError:
@@ -327,7 +325,7 @@ class App(ttk.Window):
         BG.thread(task, on_done=done)
 
 
-    # --- Mantenemos la lógica de verificación universal ---
+    
     def _toggle_verify(self):
         if self.proc_verify and self.proc_verify.is_alive():
             # detener
@@ -427,7 +425,7 @@ class App(ttk.Window):
         """Controla el estado visual del botón de verificación."""
         if active:
             self.btn_verify.config(text="⏹️ Detener verificación", bootstyle=DANGER)
-            # No iniciamos el footer aquí, solo para la DB
+           
         else:
             self.btn_verify.config(text="▶️ Iniciar verificación", bootstyle=INFO)
             
@@ -492,10 +490,8 @@ class App(ttk.Window):
 
 
 if __name__ == "__main__":
-    # Soporte para Windows al usar multiprocessing
     multiprocessing.freeze_support()
     try:
-        # Esto asegura que el proceso hijo se inicialice correctamente en varios sistemas operativos
         multiprocessing.set_start_method("spawn")
     except RuntimeError:
         pass

@@ -251,18 +251,13 @@ def capturar_rostros(person_name: str) -> str:
 
 # ---------- FUNCIÓN ORQUESTADORA DE REGISTRO MODIFICADA ----------
 def registrar_persona(person_name_raw: str):
-    """
-    Inicia el proceso de captura de rostros y la actualización de la base de datos.
-    Recibe el nombre como parámetro para evitar la interacción por consola.
-    """
+
     if not person_name_raw.strip():
         # Devolvemos un error que la GUI puede manejar
         return None, "[ERROR] El nombre no puede estar vacío."
 
     # Usamos un nombre limpio para el directorio y DB
     person_name_clean = person_name_raw.strip().lower().replace(" ", "_")
-    
-    # Ruta consistente con el guardado en capturar_rostros
     person_path = os.path.join("dataset", person_name_clean) 
 
     if os.path.exists(person_path):

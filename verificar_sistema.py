@@ -28,9 +28,7 @@ def log_recognition(person_name: str, confidence: float):
         print(f"[ERROR LOG] No se pudo escribir en el log: {e}")
 
 
-# Se mantiene la función verificacion_en_vivo, pero añadimos la llamada al log
 def verificacion_en_vivo(embedder, known_embeddings, known_labels):
-    # Usamos cv2.CAP_DSHOW para Windows si está disponible (mejor rendimiento)
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if hasattr(cv2, "CAP_DSHOW") else cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[ERROR] No se pudo abrir la cámara.")
