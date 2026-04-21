@@ -34,16 +34,24 @@ venv.bak/
 *.swp
 *.swo
 
-# --- Project Specific ---
-dataset/
-database/
-logs/
+# --- Project Specific (Data & Logs) ---
+# Ignoramos el contenido pero mantenemos la estructura de carpetas
+dataset/*
+!dataset/.gitkeep
+database/*
+!database/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Archivos pesados o generados
 recognition_log.txt
 *.h5
 *.npz
 *.pkt
+*.sqlite
 
 # --- OS ---
 .DS_Store
 Thumbs.db
 desktop.ini
+
